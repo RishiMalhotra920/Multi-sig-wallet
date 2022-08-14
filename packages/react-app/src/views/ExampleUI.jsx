@@ -1,9 +1,14 @@
 import { Button, Card, DatePicker, Divider, Input, Progress, Slider, Spin, Switch } from "antd";
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { utils } from "ethers";
 import { SyncOutlined } from "@ant-design/icons";
 
-import { Address, Balance, Events } from "../components";
+import { useEventListener } from "eth-hooks/events/useEventListener";
+
+// import {EtherInput}
+import { Address, Balance, Events, EtherInput } from "../components";
+
+import AddSigners from "./sections/AddSigners";
 
 export default function ExampleUI({
   purpose,
@@ -16,206 +21,242 @@ export default function ExampleUI({
   readContracts,
   writeContracts,
 }) {
-  const [newPurpose, setNewPurpose] = useState("loading...");
+  async function createUnsignedTx() {
+    const result = tx(
+      writeContracts.YourContract.createUnsignedTx(newTx.account, utils.parseEther(newTx.amount.toString())),
+      update => {
+        console.log("📡 Authorized signer Update:", update);
+        if (update && (update.status === "confirmed" || update.status === 1)) {
+          console.log(" 🍾 Transaction " + update.hash + " finished!");
+          console.log(
+            " ⛽️ " +
+              update.gasUsed +
+              "/" +
+              (update.gasLimit || update.gas) +
+              " @ " +
+              parseFloat(update.gasPrice) / 1000000000 +
+              " gwei",
+          );
+        }
+      },
+    );
+    console.log("awaiting metamask/web3 confirm result...", result);
+    console.log(await result);
+  }
+
+  async function signTx() {
+    const result = tx(writeContracts.YourContract.signTx(), update => {});
+    console.log("awaiting metamask/web3 confirm result...", result);
+    console.log(await result);
+  }
+
+  async function removeAuthorizedSignersAndPendingTxs() {
+    const result = tx(writeContracts.YourContract.removeAuthorizedSignersAndPendingTxs(), update => {});
+    console.log("awaiting metamask/web3 confirm result...", result);
+    console.log(await result);
+  }
+
+  const [newSigners, setNewSigners] = useState([]);
+  console.log("current newSigners", newSigners);
+  const [newNumSignersRequired, setNewNumSignersRequired] = useState();
+  const [numSignersRequired, setNumSignersRequired] = useState();
+  console.log("logging newSigners", newSigners);
+  const [newTx, setNewTx] = useState({ address: "", amount: "" });
+
+  const pendingTxEvents = useEventListener(readContracts, "YourContract", "UnsignedTxCreated", localProvider, 1);
+  const txSentEvents = useEventListener(readContracts, "YourContract", "TxSent", localProvider, 1);
+
+  const [pendingTx, setPendingTx] = useState({ account: null, amount: null });
+  console.log("logging this account", pendingTxEvents[pendingTxEvents.length - 1]?.args);
+
+  useEffect(() => {
+    setPendingTx({
+      account: pendingTxEvents[pendingTxEvents.length - 1]?.args?.account,
+      amount: pendingTxEvents[pendingTxEvents.length - 1]?.args?.amount,
+    });
+    console.log("logging this account", pendingTxEvents[pendingTxEvents.length - 1]?.args?.account);
+  }, [pendingTxEvents]);
+
+  useEffect(() => {
+    setPendingTx({
+      account: "",
+      amount: "",
+    });
+    console.log("Tx done");
+  }, [txSentEvents]);
+
+  const authorizedSignersEvents = useEventListener(
+    readContracts,
+    "YourContract",
+    "SignersAuthorized",
+    localProvider,
+    1,
+  );
+  const [authorizedSigners, setAuthorizedSigners] = useState([]);
+  useEffect(() => {
+    setAuthorizedSigners(authorizedSignersEvents[authorizedSignersEvents.length - 1]?.args?.authorizedSigners);
+    setNumSignersRequired(authorizedSignersEvents[authorizedSignersEvents.length - 1]?.args?.numSignersRequired);
+  }, [authorizedSignersEvents]);
+
+  const AuthorizedSignersAndPendingTxsRemovedEvents = useEventListener(
+    readContracts,
+    "YourContract",
+    "AuthorizedSignersAndPendingTxsRemoved",
+    localProvider,
+    1,
+  );
+  useEffect(() => {
+    setAuthorizedSigners([]);
+    setNumSignersRequired(0);
+  }, [AuthorizedSignersAndPendingTxsRemovedEvents]);
 
   return (
     <div>
-      {/*
-        ⚙️ Here is an example UI that displays and sets the purpose in your smart contract:
-      */}
+      {/* <p>hey {pendingTransactionEvents.args.toString()}</p> */}
       <div style={{ border: "1px solid #cccccc", padding: 16, width: 400, margin: "auto", marginTop: 64 }}>
-        <h2>Example UI:</h2>
-        <h4>purpose: {purpose}</h4>
-        <Divider />
-        <div style={{ margin: 8 }}>
-          <Input
-            onChange={e => {
-              setNewPurpose(e.target.value);
-            }}
-          />
-          <Button
-            style={{ marginTop: 8 }}
-            onClick={async () => {
-              /* look how you call setPurpose on your contract: */
-              /* notice how you pass a call back for tx updates too */
-              const result = tx(writeContracts.YourContract.setPurpose(newPurpose), update => {
-                console.log("📡 Transaction Update:", update);
-                if (update && (update.status === "confirmed" || update.status === 1)) {
-                  console.log(" 🍾 Transaction " + update.hash + " finished!");
-                  console.log(
-                    " ⛽️ " +
-                      update.gasUsed +
-                      "/" +
-                      (update.gasLimit || update.gas) +
-                      " @ " +
-                      parseFloat(update.gasPrice) / 1000000000 +
-                      " gwei",
-                  );
-                }
-              });
-              console.log("awaiting metamask/web3 confirm result...", result);
-              console.log(await result);
-            }}
-          >
-            Set Purpose!
-          </Button>
-        </div>
-        <Divider />
-        Your Address:
-        <Address address={address} ensProvider={mainnetProvider} fontSize={16} />
-        <Divider />
-        ENS Address Example:
-        <Address
-          address="0x34aA3F359A9D614239015126635CE7732c18fDF3" /* this will show as austingriffith.eth */
-          ensProvider={mainnetProvider}
-          fontSize={16}
-        />
-        <Divider />
-        {/* use utils.formatEther to display a BigNumber: */}
-        <h2>Your Balance: {yourLocalBalance ? utils.formatEther(yourLocalBalance) : "..."}</h2>
-        <div>OR</div>
-        <Balance address={address} provider={localProvider} price={price} />
-        <Divider />
-        <div>🐳 Example Whale Balance:</div>
-        <Balance balance={utils.parseEther("1000")} provider={localProvider} price={price} />
-        <Divider />
-        {/* use utils.formatEther to display a BigNumber: */}
-        <h2>Your Balance: {yourLocalBalance ? utils.formatEther(yourLocalBalance) : "..."}</h2>
-        <Divider />
         Your Contract Address:
         <Address
           address={readContracts && readContracts.YourContract ? readContracts.YourContract.address : null}
-          ensProvider={mainnetProvider}
+          ensProvider={localProvider}
           fontSize={16}
         />
         <Divider />
-        <div style={{ margin: 8 }}>
-          <Button
-            onClick={() => {
-              /* look how you call setPurpose on your contract: */
-              tx(writeContracts.YourContract.setPurpose("🍻 Cheers"));
-            }}
-          >
-            Set Purpose to &quot;🍻 Cheers&quot;
-          </Button>
-        </div>
-        <div style={{ margin: 8 }}>
-          <Button
-            onClick={() => {
-              /*
-              you can also just craft a transaction and send it to the tx() transactor
-              here we are sending value straight to the contract's address:
-            */
-              tx({
-                to: writeContracts.YourContract.address,
-                value: utils.parseEther("0.001"),
-              });
-              /* this should throw an error about "no fallback nor receive function" until you add it */
-            }}
-          >
-            Send Value
-          </Button>
-        </div>
-        <div style={{ margin: 8 }}>
-          <Button
-            onClick={() => {
-              /* look how we call setPurpose AND send some value along */
-              tx(
-                writeContracts.YourContract.setPurpose("💵 Paying for this one!", {
-                  value: utils.parseEther("0.001"),
-                }),
-              );
-              /* this will fail until you make the setPurpose function payable */
-            }}
-          >
-            Set Purpose With Value
-          </Button>
-        </div>
-        <div style={{ margin: 8 }}>
-          <Button
-            onClick={() => {
-              /* you can also just craft a transaction and send it to the tx() transactor */
-              tx({
-                to: writeContracts.YourContract.address,
-                value: utils.parseEther("0.001"),
-                data: writeContracts.YourContract.interface.encodeFunctionData("setPurpose(string)", [
-                  "🤓 Whoa so 1337!",
-                ]),
-              });
-              /* this should throw an error about "no fallback nor receive function" until you add it */
-            }}
-          >
-            Another Example
-          </Button>
-        </div>
-      </div>
+        <h2>Contract Balance:</h2>
+        <Balance
+          address={readContracts && readContracts.YourContract ? readContracts.YourContract.address : null}
+          provider={localProvider}
+          price={price}
+        />
+        <Divider />
+        {authorizedSigners?.length !== 0 ? (
+          <>
+            <h2>Send New Transaction</h2>
+            <p style={{ marginBottom: 10 }}>Account</p>
+            <Input
+              style={{ width: "80%" }}
+              onChange={e => {
+                setNewTx(prevNewTx => ({ account: e.target.value, value: prevNewTx.amount }));
+              }}
+            />
+            <p style={{ marginTop: 20, marginBottom: 10 }}>Ether Amount</p>
+            <p>this: {newTx.amount}</p>
+            <div style={{ width: "80%", margin: "auto" }}>
+              <EtherInput
+                autofocus
+                price={price}
+                value={newTx.amount}
+                placeholder="Enter amount"
+                onChange={value => {
+                  setNewTx(prevNewTx => ({ account: prevNewTx.account, amount: value }));
+                }}
+              />
+            </div>
+            <div style={{ margin: 14 }}></div>
+            <Button
+              onClick={() => {
+                createUnsignedTx();
+              }}
+            >
+              Sign Transaction
+            </Button>
+            <div style={{ margin: 8 }}></div>
+            <Divider />
+            <h2 style={{ marginBottom: "20px" }}>Pending Transactions</h2>
+            <table style={{ width: "100%", marginBottom: "40px" }}>
+              <tr>
+                <th>To:</th>
+                <th>Amount:</th>
+                <th></th>
+              </tr>
 
-      {/*
-        📑 Maybe display a list of events?
-          (uncomment the event and emit line in YourContract.sol! )
-      */}
+              {pendingTx.account && pendingTx.amount && (
+                <tr>
+                  <td>
+                    <Address
+                      address={pendingTx?.account}
+                      ensProvider={mainnetProvider}
+                      // blockExplorer={blockExplorer}
+                      fontSize={13}
+                    />
+                    {/* {pendingTx?.account?.slice(0, 5) + "..." + pendingTx?.account?.slice(pendingTx?.account?.length - 4)} */}
+                  </td>
+                  <td>{pendingTx.amount && utils.formatEther(pendingTx?.amount?.toString())}</td>
+                  <td>
+                    <Button style={{ marginTop: 8, width: "40%" }} onClick={() => signTx()}>
+                      Sign
+                    </Button>
+                  </td>
+                </tr>
+              )}
+            </table>
+            <Divider />
+            <h2 style={{ marginBottom: "20px" }}>Current Signers</h2>
+            {authorizedSigners?.map(currentSigner => (
+              <Address
+                address={currentSigner}
+                ensProvider={mainnetProvider}
+                // blockExplorer={blockExplorer}
+                fontSize={13}
+              />
+            ))}
+            <p>
+              Num signers required:<b>{numSignersRequired?.toString()}</b>
+            </p>
+            <Divider />
+            <Button onClick={() => removeAuthorizedSignersAndPendingTxs()}>
+              Remove Authorized Signers and Pending Tasks
+            </Button>
+          </>
+        ) : (
+          <AddSigners
+            newSigners={newSigners}
+            setNewSigners={setNewSigners}
+            newNumSignersRequired={newNumSignersRequired}
+            setNewNumSignersRequired={setNewNumSignersRequired}
+            tx={tx}
+            writeContracts={writeContracts}
+          />
+        )}
+      </div>
+      <Divider />
+      <h2>Signers Authorized Events</h2>
       <Events
         contracts={readContracts}
         contractName="YourContract"
-        eventName="SetPurpose"
+        eventName="SignersAuthorized"
         localProvider={localProvider}
         mainnetProvider={mainnetProvider}
         startBlock={1}
       />
-
-      <div style={{ width: 600, margin: "auto", marginTop: 32, paddingBottom: 256 }}>
-        <Card>
-          Check out all the{" "}
-          <a
-            href="https://github.com/austintgriffith/scaffold-eth/tree/master/packages/react-app/src/components"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            📦 components
-          </a>
-        </Card>
-
-        <Card style={{ marginTop: 32 }}>
-          <div>
-            There are tons of generic components included from{" "}
-            <a href="https://ant.design/components/overview/" target="_blank" rel="noopener noreferrer">
-              🐜 ant.design
-            </a>{" "}
-            too!
-          </div>
-
-          <div style={{ marginTop: 8 }}>
-            <Button type="primary">Buttons</Button>
-          </div>
-
-          <div style={{ marginTop: 8 }}>
-            <SyncOutlined spin /> Icons
-          </div>
-
-          <div style={{ marginTop: 8 }}>
-            Date Pickers?
-            <div style={{ marginTop: 2 }}>
-              <DatePicker onChange={() => {}} />
-            </div>
-          </div>
-
-          <div style={{ marginTop: 32 }}>
-            <Slider range defaultValue={[20, 50]} onChange={() => {}} />
-          </div>
-
-          <div style={{ marginTop: 32 }}>
-            <Switch defaultChecked onChange={() => {}} />
-          </div>
-
-          <div style={{ marginTop: 32 }}>
-            <Progress percent={50} status="active" />
-          </div>
-
-          <div style={{ marginTop: 32 }}>
-            <Spin />
-          </div>
-        </Card>
-      </div>
+      <Divider />
+      <h2>Unsigned Tx Created Events</h2>
+      <Events
+        contracts={readContracts}
+        contractName="YourContract"
+        eventName="UnsignedTxCreated"
+        localProvider={localProvider}
+        mainnetProvider={mainnetProvider}
+        startBlock={1}
+      />
+      <Divider />
+      <h2>Tx Signed Events</h2>
+      <Events
+        contracts={readContracts}
+        contractName="YourContract"
+        eventName="TxSigned"
+        localProvider={localProvider}
+        mainnetProvider={mainnetProvider}
+        startBlock={1}
+      />
+      <h2>Tx Sent Events</h2>
+      <Events
+        contracts={readContracts}
+        contractName="YourContract"
+        eventName="TxSent"
+        localProvider={localProvider}
+        mainnetProvider={mainnetProvider}
+        startBlock={1}
+      />
     </div>
   );
 }
